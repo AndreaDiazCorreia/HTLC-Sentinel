@@ -67,6 +67,17 @@ The same binary runs as a CLI tool or an HTTP server. The server wraps all analy
 | `GET /api/block/{height}` | Analyzed transactions in a block, with filtering and pagination |
 | `GET /api/scan?start=N&end=M` | Security alerts across a block range, filterable by severity and detection type |
 | `GET /api/lightning?start=N&end=M` | Lightning activity summary with HTLC expiry distribution |
+| `GET /api/monitor` | SSE stream of real-time mempool findings (timelocks, Lightning, alerts) |
+
+The `/api/monitor` endpoint uses Server-Sent Events (SSE) to stream analysis results as transactions enter the mempool. Query parameters: `interval` (polling seconds, default 10), `min_severity` (info/warning/critical). Each event has type `tx` with a JSON payload containing `txid`, `timelock`, `lightning`, and `alerts` fields. A keep-alive ping is sent every 30 seconds.
+
+```js
+const es = new EventSource('/api/monitor?interval=5&min_severity=warning');
+es.addEventListener('tx', (e) => {
+  const data = JSON.parse(e.data);
+  // data.txid, data.timelock, data.lightning, data.alerts
+});
+```
 
 Features: CORS support for browser clients, in-memory caching ([moka](https://github.com/moka-rs/moka)) to reduce mempool.space API calls, configurable mempool.space base URL for self-hosted instances.
 

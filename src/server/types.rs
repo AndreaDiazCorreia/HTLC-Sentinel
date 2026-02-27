@@ -80,3 +80,12 @@ pub struct LightningQuery {
     pub start: u64,
     pub end: Option<u64>,
 }
+
+/// Query parameters for SSE monitor endpoint.
+#[derive(Debug, Deserialize)]
+pub struct MonitorQuery {
+    /// Polling interval in seconds (default: 10)
+    pub interval: Option<u64>,
+    /// Minimum severity to emit: "info", "warning", "critical"
+    pub min_severity: Option<String>,
+}

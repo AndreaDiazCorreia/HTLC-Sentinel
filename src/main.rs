@@ -202,6 +202,7 @@ async fn main() -> Result<()> {
             eprintln!("    GET /api/block/{{height}}?filter=timelocks&offset=0&limit=100");
             eprintln!("    GET /api/scan?start={{height}}&end={{height}}&severity=critical&detection_type=timelock_mixing");
             eprintln!("    GET /api/lightning?start={{height}}&end={{height}}");
+            eprintln!("    GET /api/monitor?interval=10&min_severity=warning  (SSE)");
 
             let listener = TcpListener::bind(&addr).await?;
             axum::serve(listener, app).await?;
