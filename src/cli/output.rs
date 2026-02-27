@@ -1,3 +1,5 @@
+use chrono::Local;
+
 use crate::lightning::types::{Confidence, LightningClassification, LightningTxType};
 use crate::security::types::{Alert, DetectionType, Severity};
 use crate::timelock::types::{SequenceMeaning, TransactionAnalysis};
@@ -189,6 +191,63 @@ pub fn print_lightning_block_summary(
         print_lightning_classification(txid, lc);
         println!();
     }
+}
+
+pub fn print_monitor_hit(
+    analysis: &TransactionAnalysis,
+    lightning: &LightningClassification,
+    alerts: &[Alert],
+) {
+    let now = Local::now().format("%H:%M:%S");
+    println!("[{now}] {}", analysis.txid);
+
+    if let Some(ref t) = lightning.tx_type {
+        let type_str = match t {
+            LightningTxType::Commitment => "commitment (force-close)",
+            LightningTxType::HtlcTimeout => "HTLC-timeout",
+            LightningTxType::HtlcSuccess => "HTLC-success",
+        };
+        let conf = match lightning.confidence {
+            Confidence::None => "none",
+            Confidence::Possible => "possible",
+            Confidence::HighlyLikely => "highly likely",
+        };
+        println!("  ⚡ Lightning: {type_str} [{conf}]");
+    }
+
+    for alert in alerts {
+        let severity_tag = match alert.severity {
+            Severity::Critical => "CRITICAL",
+            Severity::Warning => "WARNING ",
+            Severity::Informational => "INFO    ",
+        };
+        let detection = match alert.detection_type {
+            DetectionType::TimelockMixing => "timelock-mixing",
+            DetectionType::ShortCltvDelta => "short-cltv-delta",
+            DetectionType::HtlcClustering => "htlc-clustering",
+            DetectionType::AnomalousSequence => "anomalous-sequence",
+        };
+        println!("  [{severity_tag}] {detection}: {}", alert.description);
+    }
+
+    if analysis.summary.has_active_timelocks {
+        let mut parts = Vec::new();
+        if analysis.summary.nlocktime_active {
+            parts.push("nLockTime".to_string());
+        }
+        if analysis.summary.relative_timelock_count > 0 {
+            parts.push(format!("{} nSequence", analysis.summary.relative_timelock_count));
+        }
+        if analysis.summary.cltv_count > 0 {
+            parts.push(format!("{} CLTV", analysis.summary.cltv_count));
+        }
+        if analysis.summary.csv_count > 0 {
+            parts.push(format!("{} CSV", analysis.summary.csv_count));
+        }
+        println!("  timelocks: {}", parts.join(", "));
+    }
+
+    println!();
 }
 
 pub fn print_block_summary(height: u64, analyses: &[TransactionAnalysis]) {

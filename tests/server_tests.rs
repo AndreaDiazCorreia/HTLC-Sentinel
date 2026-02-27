@@ -54,6 +54,10 @@ impl DataSource for MockClient {
         let txs = self.transactions.lock().unwrap();
         Ok(txs.clone())
     }
+
+    async fn get_mempool_recent_txids(&self) -> Result<Vec<String>> {
+        Ok(Vec::new())
+    }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

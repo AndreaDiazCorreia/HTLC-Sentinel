@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -11,7 +12,7 @@ use cltv_scan::cli::output;
 use cltv_scan::lightning::detector::classify_lightning;
 use cltv_scan::lightning::types::LightningTxType;
 use cltv_scan::security::analyzer;
-use cltv_scan::security::types::SecurityConfig;
+use cltv_scan::security::types::{SecurityConfig, Severity};
 use cltv_scan::server;
 use cltv_scan::timelock::extractor::analyze_transaction;
 
@@ -56,6 +57,27 @@ enum Commands {
         /// Request delay in milliseconds (rate limiting)
         #[arg(long, default_value_t = 250)]
         request_delay_ms: u64,
+    },
+    /// Monitor the mempool in real-time for timelock activity
+    Monitor {
+        /// Polling interval in seconds
+        #[arg(short, long, default_value_t = 10)]
+        interval: u64,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+        /// Minimum severity to display (info, warning, critical)
+        #[arg(long)]
+        min_severity: Option<String>,
+        /// CLTV critical threshold (blocks remaining)
+        #[arg(long, default_value_t = 18)]
+        cltv_critical: u32,
+        /// CLTV warning threshold (blocks remaining)
+        #[arg(long, default_value_t = 34)]
+        cltv_warning: u32,
+        /// CLTV info threshold (blocks remaining)
+        #[arg(long, default_value_t = 72)]
+        cltv_info: u32,
     },
     /// Security scan for attack patterns and vulnerabilities
     Scan {
@@ -184,6 +206,108 @@ async fn main() -> Result<()> {
             let listener = TcpListener::bind(&addr).await?;
             axum::serve(listener, app).await?;
             return Ok(());
+        }
+        Commands::Monitor {
+            interval,
+            json,
+            min_severity,
+            cltv_critical,
+            cltv_warning,
+            cltv_info,
+        } => {
+            let min_sev = match min_severity.as_deref() {
+                Some("critical") => Severity::Critical,
+                Some("warning") => Severity::Warning,
+                _ => Severity::Informational,
+            };
+            let config = SecurityConfig {
+                cltv_critical_threshold: cltv_critical,
+                cltv_warning_threshold: cltv_warning,
+                cltv_info_threshold: cltv_info,
+                ..SecurityConfig::default()
+            };
+
+            eprintln!("Monitoring mempool (every {interval}s, Ctrl+C to stop)...");
+            eprintln!();
+
+            let mut seen = HashSet::new();
+            let poll_interval = Duration::from_secs(interval);
+
+            loop {
+                let current_height = match client.get_block_tip_height().await {
+                    Ok(h) => h,
+                    Err(e) => {
+                        eprintln!("error fetching tip: {e}");
+                        tokio::time::sleep(poll_interval).await;
+                        continue;
+                    }
+                };
+
+                let txids = match client.get_mempool_recent_txids().await {
+                    Ok(t) => t,
+                    Err(e) => {
+                        eprintln!("error fetching mempool: {e}");
+                        tokio::time::sleep(poll_interval).await;
+                        continue;
+                    }
+                };
+
+                for txid in &txids {
+                    if !seen.insert(txid.clone()) {
+                        continue;
+                    }
+
+                    let tx = match client.get_transaction(txid).await {
+                        Ok(t) => t,
+                        Err(e) => {
+                            eprintln!("error fetching tx {txid}: {e}");
+                            continue;
+                        }
+                    };
+
+                    let timelock = analyze_transaction(&tx);
+                    let lightning = classify_lightning(&tx);
+                    let alerts = analyzer::analyze_transaction(
+                        &timelock,
+                        &lightning,
+                        current_height,
+                        &config,
+                    );
+
+                    let alerts: Vec<_> = alerts
+                        .into_iter()
+                        .filter(|a| a.severity >= min_sev)
+                        .collect();
+
+                    let dominated =
+                        !alerts.is_empty()
+                        || lightning.tx_type.is_some()
+                        || timelock.summary.has_active_timelocks;
+
+                    if !dominated {
+                        continue;
+                    }
+
+                    if json {
+                        let entry = serde_json::json!({
+                            "txid": txid,
+                            "timelock": timelock,
+                            "lightning": lightning,
+                            "alerts": alerts,
+                        });
+                        println!("{}", serde_json::to_string(&entry)?);
+                    } else {
+                        output::print_monitor_hit(&timelock, &lightning, &alerts);
+                    }
+                }
+
+                // Cap seen set to avoid unbounded growth
+                if seen.len() > 10_000 {
+                    seen.clear();
+                }
+
+                tokio::time::sleep(poll_interval).await;
+            }
         }
         Commands::Scan {
             start,

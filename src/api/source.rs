@@ -31,4 +31,9 @@ pub trait DataSource {
         &self,
         height: u64,
     ) -> impl std::future::Future<Output = Result<Vec<ApiTransaction>>> + Send;
+
+    /// Fetch txids of recent unconfirmed transactions from the mempool.
+    fn get_mempool_recent_txids(
+        &self,
+    ) -> impl std::future::Future<Output = Result<Vec<String>>> + Send;
 }

@@ -98,4 +98,9 @@ impl<S: DataSource + Send + Sync> DataSource for CachedClient<S> {
         // via get_block_txs above
         self.inner.get_all_block_txs(height).await
     }
+
+    async fn get_mempool_recent_txids(&self) -> Result<Vec<String>> {
+        // No caching — always want fresh mempool data
+        self.inner.get_mempool_recent_txids().await
+    }
 }

@@ -4,8 +4,15 @@ use anyhow::{Context, Result, bail};
 use reqwest::StatusCode;
 use tokio::time::sleep;
 
+use serde::Deserialize;
+
 use super::source::DataSource;
 use super::types::ApiTransaction;
+
+#[derive(Deserialize)]
+struct MempoolRecentEntry {
+    txid: String,
+}
 
 pub struct MempoolClient {
     client: reqwest::Client,
@@ -141,5 +148,15 @@ impl DataSource for MempoolClient {
         }
 
         Ok(all_txs)
+    }
+
+    async fn get_mempool_recent_txids(&self) -> Result<Vec<String>> {
+        let url = format!("{}/api/mempool/recent", self.base_url);
+        let resp = self.get_with_retry(&url).await?;
+        let entries = resp
+            .json::<Vec<MempoolRecentEntry>>()
+            .await
+            .context("deserializing mempool recent transactions")?;
+        Ok(entries.into_iter().map(|e| e.txid).collect())
     }
 }
