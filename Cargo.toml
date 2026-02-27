@@ -2,5 +2,14 @@
 name = "cltv-scan"
 version = "0.1.0"
 edition = "2024"
+description = "Bitcoin timelock vulnerability scanner"
 
 [dependencies]
+anyhow = "1"
+chrono = "0.4"
+clap = { version = "4", features = ["derive"] }
+reqwest = { version = "0.12", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
