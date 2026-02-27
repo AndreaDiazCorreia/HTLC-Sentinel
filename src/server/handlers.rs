@@ -1,9 +1,13 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::convert::Infallible;
 use std::sync::Arc;
+use std::time::Duration;
 
+use async_stream::stream;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Json;
+use axum::response::sse::{Event, KeepAlive, KeepAliveStream, Sse};
 
 use crate::api::source::DataSource;
 use crate::lightning::detector::classify_lightning;
@@ -243,6 +247,77 @@ pub async fn get_lightning<S: DataSource + Send + Sync>(
         transactions: ln_txs,
         cltv_expiry_distribution,
     }))
+}
+
+pub async fn get_monitor<S: DataSource + Send + Sync + 'static>(
+    State(state): State<AppState<S>>,
+    Query(params): Query<MonitorQuery>,
+) -> Sse<KeepAliveStream<std::pin::Pin<Box<dyn futures_core::Stream<Item = Result<Event, Infallible>> + Send>>>> {
+    let interval = Duration::from_secs(params.interval.unwrap_or(10));
+    let min_sev = match params.min_severity.as_deref() {
+        Some("critical") => Severity::Critical,
+        Some("warning") => Severity::Warning,
+        _ => Severity::Informational,
+    };
+
+    let s = stream! {
+        let mut seen: HashSet<String> = HashSet::new();
+
+        loop {
+            let tip = state.client.get_block_tip_height().await.unwrap_or(0);
+
+            if let Ok(txids) = state.client.get_mempool_recent_txids().await {
+                for txid in txids {
+                    if !seen.insert(txid.clone()) {
+                        continue;
+                    }
+
+                    let tx = match state.client.get_transaction(&txid).await {
+                        Ok(t) => t,
+                        Err(_) => continue,
+                    };
+
+                    let timelock = analyze_transaction(&tx);
+                    let lightning = classify_lightning(&tx);
+                    let alerts: Vec<_> = analyzer::analyze_transaction(
+                        &timelock, &lightning, tip, &state.config,
+                    )
+                    .into_iter()
+                    .filter(|a| a.severity >= min_sev)
+                    .collect();
+
+                    let has_findings = !alerts.is_empty()
+                        || lightning.tx_type.is_some()
+                        || timelock.summary.has_active_timelocks;
+
+                    if !has_findings {
+                        continue;
+                    }
+
+                    let payload = serde_json::json!({
+                        "txid": txid,
+                        "timelock": timelock,
+                        "lightning": lightning,
+                        "alerts": alerts,
+                    });
+
+                    if let Ok(data) = serde_json::to_string(&payload) {
+                        let event: Result<Event, Infallible> = Ok(Event::default().event("tx").data(data));
+                        yield event;
+                    }
+                }
+            }
+
+            if seen.len() > 10_000 {
+                seen.clear();
+            }
+
+            tokio::time::sleep(interval).await;
+        }
+    };
+
+    let boxed: std::pin::Pin<Box<dyn futures_core::Stream<Item = Result<Event, Infallible>> + Send>> = Box::pin(s);
+    Sse::new(boxed).keep_alive(KeepAlive::new().interval(Duration::from_secs(30)))
 }
 
 fn parse_severity(s: &str) -> Option<Severity> {

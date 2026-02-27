@@ -28,6 +28,7 @@ pub fn create_router<S: DataSource + Send + Sync + 'static>(
         .route("/api/block/{height}", get(handlers::get_block::<S>))
         .route("/api/scan", get(handlers::get_scan::<S>))
         .route("/api/lightning", get(handlers::get_lightning::<S>))
+        .route("/api/monitor", get(handlers::get_monitor::<S>))
         .layer(cors)
         .with_state(state)
 }

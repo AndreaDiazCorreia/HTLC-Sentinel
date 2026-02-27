@@ -6,7 +6,13 @@ description = "Bitcoin timelock vulnerability scanner"
 
 [dependencies]
 anyhow = "1"
+
 bitcoin = "0.32"
+
+async-stream = "0.3"
+futures-core = "0.3"
+axum = "0.8"
+
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 axum = { version = "0.8", features = ["http1", "json", "tracing"] }
