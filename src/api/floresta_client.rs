@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use bitcoin::{Network, Txid};
 use floresta_node::{Config, Florestad};
 use floresta_rpc::jsonrpc_client::Client as FlorestaRpcClient;
-use floresta_rpc::rpc::FlorestaRPC;
+use floresta_rpc::rpc::{FlorestaRPC, JsonRPCClient};
 use floresta_rpc::rpc_types::{GetBlockRes, RawTx};
 use once_cell::sync::OnceCell;
 use tokio::task::spawn_blocking;
@@ -146,7 +146,13 @@ impl DataSource for FlorestaClient {
         let txid = txid.parse::<Txid>()?;
 
         let raw = spawn_blocking(move || {
-            let value = client.get_transaction(txid, Some(true))?;
+            let value: serde_json::Value = client.call(
+                "getrawtransaction",
+                &[
+                    serde_json::Value::String(txid.to_string()),
+                    serde_json::Value::Bool(true),
+                ],
+            )?;
             let tx: RawTx = serde_json::from_value(value)?;
             Ok::<_, anyhow::Error>(tx)
         })
@@ -162,12 +168,15 @@ impl DataSource for FlorestaClient {
         let txid = txid.parse::<Txid>()?;
 
         let hex = spawn_blocking(move || {
-            let value = client.get_transaction(txid, Some(false))?;
-            let s = value
-                .as_str()
-                .ok_or_else(|| anyhow::anyhow!("unexpected RPC type for gettransaction"))?
-                .to_string();
-            Ok::<_, anyhow::Error>(s)
+            let value: serde_json::Value = client.call(
+                "getrawtransaction",
+                &[
+                    serde_json::Value::String(txid.to_string()),
+                    serde_json::Value::Bool(false),
+                ],
+            )?;
+            let tx: RawTx = serde_json::from_value(value)?;
+            Ok::<_, anyhow::Error>(tx.hex)
         })
         .await??;
 
@@ -190,7 +199,13 @@ impl DataSource for FlorestaClient {
             let mut out = Vec::new();
             for txid_str in verbose.tx {
                 let txid: Txid = txid_str.parse()?;
-                let value = client.get_transaction(txid, Some(true))?;
+                let value: serde_json::Value = client.call(
+                    "getrawtransaction",
+                    &[
+                        serde_json::Value::String(txid.to_string()),
+                        serde_json::Value::Bool(true),
+                    ],
+                )?;
                 let raw: RawTx = serde_json::from_value(value)?;
                 out.push(FlorestaClient::map_raw_tx_to_api(raw));
             }
@@ -250,7 +265,13 @@ impl DataSource for FlorestaClient {
             let mut out = Vec::new();
             for txid_str in verbose.tx {
                 let txid: Txid = txid_str.parse()?;
-                let value = client.get_transaction(txid, Some(true))?;
+                let value: serde_json::Value = client.call(
+                    "getrawtransaction",
+                    &[
+                        serde_json::Value::String(txid.to_string()),
+                        serde_json::Value::Bool(true),
+                    ],
+                )?;
                 let raw: RawTx = serde_json::from_value(value)?;
                 out.push(FlorestaClient::map_raw_tx_to_api(raw));
             }
@@ -258,7 +279,6 @@ impl DataSource for FlorestaClient {
             Ok(out)
         })
         .await??;
-
         Ok(txs)
     }
 
@@ -272,6 +292,7 @@ impl DataSource for FlorestaClient {
 mod tests {
     use super::FlorestaClient;
     use super::DataSource;
+    use floresta_rpc::rpc::FlorestaRPC;
 
     #[tokio::test]
     async fn print_first_10_txs_from_tip_block() {
@@ -289,6 +310,37 @@ mod tests {
 
         for tx in txs.iter().take(10) {
             println!("{}", tx.txid);
+        }
+    }
+
+    #[tokio::test]
+    async fn print_tip_block_txids() {
+        // Ensure the embedded floresta node is running
+        super::ensure_embedded_floresta()
+            .await
+            .expect("failed to start embedded floresta");
+
+        // Use the raw Floresta RPC client to fetch the last block and list its txids
+        let client = super::FlorestaRpcClient::new(super::FLORESTA_RPC_URL.to_string());
+
+        let txids = super::spawn_blocking(move || -> super::Result<Vec<String>> {
+            let tip_height = client.get_block_count()?;
+            let hash = client.get_block_hash(tip_height)?;
+            let block = client.get_block(hash, Some(1))?;
+            let verbose = match block {
+                super::GetBlockRes::One(b) => b,
+                super::GetBlockRes::Zero(_) => {
+                    anyhow::bail!("unexpected non-verbose block response")
+                }
+            };
+            Ok(verbose.tx)
+        })
+        .await
+        .expect("join error")
+        .expect("failed to get tip block txids");
+
+        for txid in txids.iter() {
+            println!("txid: {txid}");
         }
     }
 }
