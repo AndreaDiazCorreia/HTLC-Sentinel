@@ -1,6 +1,10 @@
+use std::time::Duration;
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use tokio::net::TcpListener;
 
+use cltv_scan::api::cache::CachedClient;
 use cltv_scan::api::client::MempoolClient;
 use cltv_scan::api::source::DataSource;
 use cltv_scan::cli::output;
@@ -8,6 +12,7 @@ use cltv_scan::lightning::detector::classify_lightning;
 use cltv_scan::lightning::types::LightningTxType;
 use cltv_scan::security::analyzer;
 use cltv_scan::security::types::SecurityConfig;
+use cltv_scan::server;
 use cltv_scan::timelock::extractor::analyze_transaction;
 
 #[derive(Parser)]
@@ -39,6 +44,18 @@ enum Commands {
     Lightning {
         #[command(subcommand)]
         command: LightningCommands,
+    },
+    /// Start HTTP server exposing all analysis as JSON API
+    Serve {
+        /// Port to listen on
+        #[arg(short, long, default_value_t = 3001)]
+        port: u16,
+        /// mempool.space API base URL
+        #[arg(long, default_value = "https://mempool.space")]
+        mempool_url: String,
+        /// Request delay in milliseconds (rate limiting)
+        #[arg(long, default_value_t = 250)]
+        request_delay_ms: u64,
     },
     /// Security scan for attack patterns and vulnerabilities
     Scan {
@@ -145,6 +162,29 @@ async fn main() -> Result<()> {
                 }
             }
         },
+        Commands::Serve {
+            port,
+            mempool_url,
+            request_delay_ms,
+        } => {
+            let client = MempoolClient::new(&mempool_url, Duration::from_millis(request_delay_ms));
+            let cached = CachedClient::new(client, 10_000);
+            let config = SecurityConfig::default();
+            let app = server::create_router(cached, config);
+
+            let addr = format!("0.0.0.0:{port}");
+            eprintln!("Starting server on {addr}");
+            eprintln!("  mempool.space: {mempool_url}");
+            eprintln!("  Endpoints:");
+            eprintln!("    GET /api/tx/{{txid}}");
+            eprintln!("    GET /api/block/{{height}}?filter=timelocks&offset=0&limit=100");
+            eprintln!("    GET /api/scan?start={{height}}&end={{height}}&severity=critical&detection_type=timelock_mixing");
+            eprintln!("    GET /api/lightning?start={{height}}&end={{height}}");
+
+            let listener = TcpListener::bind(&addr).await?;
+            axum::serve(listener, app).await?;
+            return Ok(());
+        }
         Commands::Scan {
             start,
             end,
