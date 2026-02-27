@@ -5,6 +5,9 @@ use cltv_scan::api::client::MempoolClient;
 use cltv_scan::api::source::DataSource;
 use cltv_scan::cli::output;
 use cltv_scan::lightning::detector::classify_lightning;
+use cltv_scan::lightning::types::LightningTxType;
+use cltv_scan::security::analyzer;
+use cltv_scan::security::types::SecurityConfig;
 use cltv_scan::timelock::extractor::analyze_transaction;
 
 #[derive(Parser)]
@@ -36,6 +39,32 @@ enum Commands {
     Lightning {
         #[command(subcommand)]
         command: LightningCommands,
+    },
+    /// Security scan for attack patterns and vulnerabilities
+    Scan {
+        /// Start block height
+        start: u64,
+        /// End block height (inclusive). Defaults to start (single block).
+        #[arg(short, long)]
+        end: Option<u64>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+        /// CLTV critical threshold (blocks remaining)
+        #[arg(long, default_value_t = 18)]
+        cltv_critical: u32,
+        /// CLTV warning threshold (blocks remaining)
+        #[arg(long, default_value_t = 34)]
+        cltv_warning: u32,
+        /// CLTV info threshold (blocks remaining)
+        #[arg(long, default_value_t = 72)]
+        cltv_info: u32,
+        /// HTLC clustering window size (blocks)
+        #[arg(long, default_value_t = 6)]
+        cluster_window: u32,
+        /// HTLC clustering count threshold
+        #[arg(long, default_value_t = 85)]
+        cluster_threshold: usize,
     },
 }
 
@@ -116,6 +145,67 @@ async fn main() -> Result<()> {
                 }
             }
         },
+        Commands::Scan {
+            start,
+            end,
+            json,
+            cltv_critical,
+            cltv_warning,
+            cltv_info,
+            cluster_window,
+            cluster_threshold,
+        } => {
+            let end = end.unwrap_or(start);
+            let config = SecurityConfig {
+                cltv_critical_threshold: cltv_critical,
+                cltv_warning_threshold: cltv_warning,
+                cltv_info_threshold: cltv_info,
+                clustering_window_size: cluster_window,
+                clustering_count_threshold: cluster_threshold,
+                ..SecurityConfig::default()
+            };
+
+            let current_height = client.get_block_tip_height().await?;
+            eprintln!("Current tip: block {current_height}");
+
+            let mut all_alerts = Vec::new();
+            let mut htlc_expiries = Vec::new();
+
+            for height in start..=end {
+                eprintln!("Scanning block {height}...");
+                let txs = client.get_all_block_txs(height).await?;
+                eprintln!("  {} transactions", txs.len());
+
+                for tx in &txs {
+                    let timelock = analyze_transaction(tx);
+                    let lightning = classify_lightning(tx);
+
+                    // Collect HTLC expiries for clustering analysis
+                    if lightning.tx_type == Some(LightningTxType::HtlcTimeout) {
+                        if let Some(expiry) = lightning.params.cltv_expiry {
+                            htlc_expiries.push(expiry);
+                        }
+                    }
+
+                    let mut alerts =
+                        analyzer::analyze_transaction(&timelock, &lightning, current_height, &config);
+                    all_alerts.append(&mut alerts);
+                }
+            }
+
+            // Cross-transaction clustering analysis
+            let mut cluster_alerts = analyzer::detect_htlc_clustering(&htlc_expiries, &config);
+            all_alerts.append(&mut cluster_alerts);
+
+            // Sort by severity (critical first)
+            all_alerts.sort_by(|a, b| b.severity.cmp(&a.severity));
+
+            if json {
+                println!("{}", serde_json::to_string_pretty(&all_alerts)?);
+            } else {
+                output::print_security_scan(start, end, &all_alerts);
+            }
+        }
     }
 
     Ok(())

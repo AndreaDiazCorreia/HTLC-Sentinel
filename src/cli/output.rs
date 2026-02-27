@@ -1,4 +1,5 @@
 use crate::lightning::types::{Confidence, LightningClassification, LightningTxType};
+use crate::security::types::{Alert, DetectionType, Severity};
 use crate::timelock::types::{SequenceMeaning, TransactionAnalysis};
 
 pub fn print_transaction_analysis(analysis: &TransactionAnalysis) {
@@ -209,6 +210,67 @@ pub fn print_block_summary(height: u64, analyses: &[TransactionAnalysis]) {
 
     for analysis in &with_timelocks {
         print_transaction_analysis(analysis);
+        println!();
+    }
+}
+
+pub fn print_security_scan(start: u64, end: u64, alerts: &[Alert]) {
+    let range = if start == end {
+        format!("block {start}")
+    } else {
+        format!("blocks {start}–{end}")
+    };
+
+    println!("Security Scan: {range}");
+    println!("{}", "═".repeat(72));
+
+    let critical = alerts.iter().filter(|a| a.severity == Severity::Critical).count();
+    let warning = alerts.iter().filter(|a| a.severity == Severity::Warning).count();
+    let info = alerts.iter().filter(|a| a.severity == Severity::Informational).count();
+
+    println!(
+        "{} alerts: {} critical, {} warning, {} informational",
+        alerts.len(),
+        critical,
+        warning,
+        info
+    );
+    println!();
+
+    if alerts.is_empty() {
+        println!("No security findings in {range}.");
+        return;
+    }
+
+    for alert in alerts {
+        let severity_tag = match alert.severity {
+            Severity::Critical => "CRITICAL",
+            Severity::Warning => "WARNING ",
+            Severity::Informational => "INFO    ",
+        };
+        let detection = match alert.detection_type {
+            DetectionType::TimelockMixing => "timelock-mixing",
+            DetectionType::ShortCltvDelta => "short-cltv-delta",
+            DetectionType::HtlcClustering => "htlc-clustering",
+            DetectionType::AnomalousSequence => "anomalous-sequence",
+        };
+
+        println!("[{severity_tag}] {detection}");
+        if !alert.txid.is_empty() {
+            print!("  tx: {}", alert.txid);
+            if let Some(idx) = alert.input_index {
+                print!(" input[{idx}]");
+            }
+            println!();
+        }
+        println!("  {}", alert.description);
+        if let Some(ref reference) = alert.reference {
+            print!("  ref: {} ({}, {})", reference.name, reference.authors, reference.year);
+            if let Some(ref url) = reference.url {
+                print!(" {url}");
+            }
+            println!();
+        }
         println!();
     }
 }
