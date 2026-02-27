@@ -1,5 +1,5 @@
 app = "cltv-scan"
-primary_region = "mia"
+primary_region = "dfw"
 
 [build]
 
