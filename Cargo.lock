@@ -525,12 +525,9 @@ dependencies = [
  "bitcoin",
  "chrono",
  "clap",
-
  "floresta-node",
  "floresta-rpc",
-
  "futures-core",
-
  "moka",
  "once_cell",
  "reqwest",

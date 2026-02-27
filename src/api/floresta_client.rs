@@ -261,6 +261,11 @@ impl DataSource for FlorestaClient {
 
         Ok(txs)
     }
+
+    async fn get_mempool_recent_txids(&self) -> Result<Vec<String>> {
+        // Floresta does not expose a mempool listing RPC yet.
+        Ok(Vec::new())
+    }
 }
 
 #[cfg(test)]

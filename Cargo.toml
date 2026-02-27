@@ -10,12 +10,10 @@ anyhow = "1"
 bitcoin = "0.32"
 
 async-stream = "0.3"
-futures-core = "0.3"
-axum = "0.8"
-
+axum = { version = "0.8", features = ["http1", "json", "tracing"] }
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
-axum = { version = "0.8", features = ["http1", "json", "tracing"] }
+futures-core = "0.3"
 floresta-node = { git = "https://github.com/getfloresta/Floresta", package = "floresta-node", default-features = false, features = ["json-rpc"] }
 floresta-rpc = { git = "https://github.com/getfloresta/Floresta", package = "floresta-rpc", features = ["with-jsonrpc"] }
 once_cell = "1"
