@@ -12,13 +12,13 @@ axum = { version = "0.8", features = ["http1", "json", "tracing"] }
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 futures-core = "0.3"
-floresta-node = { git = "https://github.com/getfloresta/Floresta", package = "floresta-node", default-features = false, features = ["json-rpc"] }
-floresta-rpc = { git = "https://github.com/getfloresta/Floresta", package = "floresta-rpc", features = ["with-jsonrpc"] }
+# floresta-node = { git = "https://github.com/getfloresta/Floresta", package = "floresta-node", default-features = false, features = ["json-rpc"] }
+# floresta-rpc = { git = "https://github.com/getfloresta/Floresta", package = "floresta-rpc", features = ["with-jsonrpc"] }
 once_cell = "1"
 reqwest = { version = "0.12", features = ["json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-thiserror = "2"
+# thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 tower-http = { version = "0.6", features = ["cors"] }
 tower = "0.5"
